@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"golang.org/x/crypto/bcrypt"
 	"github.com/gorilla/sessions"
 	"context"
@@ -21,8 +22,8 @@ func main() {
 	})
 	templates = template.Must(template.ParseGlob("templates/*.html"))
 	r := mux.NewRouter()
-	r.HandleFunc("/", indexGetHandler).Methods("GET")
-	r.HandleFunc("/", indexPostHandler).Methods("POST")
+	r.HandleFunc("/", AuthRequired(indexGetHandler)).Methods("GET")
+	r.HandleFunc("/", AuthRequired(indexPostHandler)).Methods("POST")
 	r.HandleFunc("/login", loginGetHandler).Methods("GET")
 	r.HandleFunc("/login", loginPostHandler).Methods("POST")
 	r.HandleFunc("/register", registerGetHandler).Methods("GET")
@@ -32,18 +33,31 @@ func main() {
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", fs))
 
 	http.Handle("/", r)
-	http.ListenAndServe(":8080", nil)
+	fmt.Println("Starting the server at port 8080....")
+	err := http.ListenAndServe(":8080", nil)
+	if err != nil {
+		fmt.Println("Error:", err)
+	}
 }
 
-func indexGetHandler(w http.ResponseWriter, r *http.Request) {
-	session, _ := store.Get(r, "session")
-	_, ok := session.Values["username"]
-	if !ok {
-		http.Redirect(w, r, "/login", 302)
-		return
-	} 
+// AuthRequired : Authentication middleware
+func AuthRequired(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		session, _ := store.Get(r, "session")
+		_, ok := session.Values["username"]
+		if !ok {
+			http.Redirect(w, r, "/login", 302)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}
+}
+
+func indexGetHandler(w http.ResponseWriter, r *http.Request) { 
 	comments, err := client.LRange(ctx,"comments", 0, 10).Result()
 	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Internal Server Error"))
 		return
 	}
 	templates.ExecuteTemplate(w, "index.html", comments)
@@ -52,7 +66,12 @@ func indexGetHandler(w http.ResponseWriter, r *http.Request) {
 func indexPostHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	comment := r.PostForm.Get("comment")
-	client.LPush(ctx, "comments", comment)
+	err := client.LPush(ctx, "comments", comment).Err()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Internal Server Error"))
+		return
+	}
 	http.Redirect(w, r, "/", 302)
 }
 
@@ -65,11 +84,17 @@ func loginPostHandler(w http.ResponseWriter, r *http.Request) {
 	username := r.PostForm.Get("username")
 	password := r.PostForm.Get("password")
 	hash, err := client.Get(ctx, "user:" + username).Bytes()
-	if err != nil {
+	if err == redis.Nil {
+		templates.ExecuteTemplate(w, "login.html", "Unknown User")
+		return
+	} else if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Internal Server Error"))
 		return
 	}
 	err = bcrypt.CompareHashAndPassword(hash, []byte(password))
 	if err != nil {
+		templates.ExecuteTemplate(w, "login.html", "Unknown User")
 		return
 	}
 	session, _ := store.Get(r, "session")
@@ -89,9 +114,16 @@ func registerPostHandler(w http.ResponseWriter, r *http.Request) {
 	cost := bcrypt.DefaultCost
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), cost)
 	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Internal Server Error"))
 		return
 	}
-	client.Set(ctx, "user:" + username, hash, 0)
+	err = client.Set(ctx, "user:" + username, hash, 0).Err()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Internal Server Error"))
+		return
+	}
 	http.Redirect(w, r, "/login", 302)
 }
 
