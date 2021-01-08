@@ -24,19 +24,27 @@ func NewRouter() (*mux.Router){
 }
 
 func indexGetHandler(w http.ResponseWriter, r *http.Request) { 
-	comments, err := models.GetComments()
+	updates, err := models.Getupdates()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("Internal Server Error"))
 		return
 	}
-	utils.ExecuteTemplate(w, "index.html", comments)
+	utils.ExecuteTemplate(w, "index.html", updates)
 }
 
 func indexPostHandler(w http.ResponseWriter, r *http.Request) {
+	session, _ := sessions.Store.Get(r, "session")
+	untypedUserID := session.Values["user_id"]
+	userID, ok := untypedUserID.(int64)
+	if !ok {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Internal Server Error"))
+		return
+	}
 	r.ParseForm()
-	comment := r.PostForm.Get("comment")
-	err := models.PostComment(comment)
+	body := r.PostForm.Get("update")
+	err := models.Postupdate(userID, body)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("Internal Server Error"))
@@ -53,7 +61,7 @@ func loginPostHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	username := r.PostForm.Get("username")
 	password := r.PostForm.Get("password")
-	err := models.AuthenticateUser(username, password)
+	user, err := models.AuthenticateUser(username, password)
 	if err != nil {
 		switch err {
 		case models.ErrUserNotFound:
@@ -66,9 +74,15 @@ func loginPostHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	userID, err := user.GetID()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Internal Server Error"))
+		return
+	}
 	
 	session, _ := sessions.Store.Get(r, "session")
-	session.Values["username"] = username
+	session.Values["user_id"] = userID
 	session.Save(r, w)
 	http.Redirect(w, r, "/", 302)
 }

@@ -38,6 +38,11 @@ func NewUser(username string, hash []byte) (*User, error) {
 	return &User{key}, nil
 }
 
+// GetID : Helper method to get the Id
+func (user *User) GetID() (int64, error) {
+	return client.HGet(ctx, user.key, "id").Int64()
+}
+
 // GetUsername : Helper method to get the username
 func (user *User) GetUsername() (string, error) {
 	return client.HGet(ctx, user.key, "username").Result()
@@ -61,6 +66,12 @@ func (user *User) Authenticate(password string) (error) {
 	return err
 }
 
+// GetUserByID : Helper ,ethod to get user by ID
+func GetUserByID(id int64) (*User, error) {
+	key := fmt.Sprintf("user:%d", id)
+	return &User{key}, nil
+}
+
 // GetUserByUsername : Helper method to get user by  username
 func GetUserByUsername(username string) (*User, error) {
 	id, err := client.HGet(ctx, "user:by-username", username).Int64()
@@ -69,17 +80,16 @@ func GetUserByUsername(username string) (*User, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	key := fmt.Sprintf("user:%d", id)
-	return &User{key}, nil
+	return GetUserByID(id)
 }
 
 // AuthenticateUser : User login authentication is performed
-func AuthenticateUser(username, password string) (error) {
+func AuthenticateUser(username, password string) (*User, error) {
 	user, err := GetUserByUsername(username)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return user.Authenticate(password)
+	return user, user.Authenticate(password)
 }
 
 // RegisterUser : Registers a user into the redis
