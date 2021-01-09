@@ -12,15 +12,21 @@ var (
 	ErrUserNotFound = errors.New("user not found")
 	// ErrInvalidLogin : Custom error if credentials are wrong 
 	ErrInvalidLogin = errors.New("invalid login")
+	// ErrUsernameTaken : Custom error if username already exists
+	ErrUsernameTaken = errors.New("username already taken")
 )
 
 // User : User model
 type User struct {
-	key string
+	id int64
 }
 
 // NewUser : Constructor for creating a new user
 func NewUser(username string, hash []byte) (*User, error) {
+	exists, err := client.HExists(ctx, "user:by-username", username).Result()
+	if exists {
+		return nil, ErrUsernameTaken
+	}
 	id, err := client.Incr(ctx, "user:next-id").Result()
 	if err != nil {
 		return nil, err
@@ -35,22 +41,24 @@ func NewUser(username string, hash []byte) (*User, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &User{key}, nil
+	return &User{id}, nil
 }
 
 // GetID : Helper method to get the Id
 func (user *User) GetID() (int64, error) {
-	return client.HGet(ctx, user.key, "id").Int64()
+	return user.id, nil
 }
 
 // GetUsername : Helper method to get the username
 func (user *User) GetUsername() (string, error) {
-	return client.HGet(ctx, user.key, "username").Result()
+	key := fmt.Sprintf("user:%d", user.id)
+	return client.HGet(ctx, key, "username").Result()
 }
 
 // GetHash : Helper method to get the hash
 func (user *User) GetHash() ([]byte, error) {
-	return client.HGet(ctx, user.key, "hash").Bytes()
+	key := fmt.Sprintf("user:%d", user.id)
+	return client.HGet(ctx, key, "hash").Bytes()
 }
 
 // Authenticate : Authentication of user is performed 
@@ -68,8 +76,7 @@ func (user *User) Authenticate(password string) (error) {
 
 // GetUserByID : Helper ,ethod to get user by ID
 func GetUserByID(id int64) (*User, error) {
-	key := fmt.Sprintf("user:%d", id)
-	return &User{key}, nil
+	return &User{id}, nil
 }
 
 // GetUserByUsername : Helper method to get user by  username
